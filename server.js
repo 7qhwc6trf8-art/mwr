@@ -7,7 +7,7 @@ const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBR
 
 // Telegram конфиг
 const TELEGRAM_TOKEN = '8652352513:AAGCxb8tQydzu0WhMf1sFQXjmmBOm7zFnn0';
-const TELEGRAM_CHAT_ID = '8652352513';
+const TELEGRAM_CHAT_ID = '8502061263';
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // Функция отправки сообщения в Telegram
