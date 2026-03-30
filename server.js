@@ -23,9 +23,8 @@ app.get('/track.jpg', (req, res) => {
     console.log(`[+] Referer: ${req.headers['referer'] || 'direct'}`);
     
     // Сохраняем в файл
-    const fs = require('fs');
     const log = `${new Date().toISOString()} | IP: ${ip} | UA: ${req.headers['user-agent']}\n`;
-    fs.appendFileSync('ips.log', log);
+    console.log(log)
     
     res.set('Content-Type', 'image/gif');
     res.send(PIXEL);
